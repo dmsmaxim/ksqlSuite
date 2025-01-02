@@ -2,9 +2,9 @@
   "name": "ksqlient",
   "version": "1.0.1",
   "description": "Javascript KsqlDB client for Node.js",
-  "main": "./ksqldb/ksqldb",
+  "main": "ksqldb/ksqldb",
   "scripts": {
-    "test": "jest --verbose --forceExit"
+    "test": "ksQlient/node_modules/.bin/jest --verbose --forceExit"
   },
   "repository": {
     "type": "git",
