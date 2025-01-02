@@ -89,57 +89,72 @@ class ksqldb {
    *         result if successful.
    */
   push(query, cb) {
-    validateInputs([query, 'string', 'query', true], [cb, 'function', 'cb', true]);
-    const validatedQuery = builder.build(query);
+      validateInputs([query, 'string', 'query', true], [cb, 'function', 'cb', true]);
+      const validatedQuery = builder.build(query);
 
-    return new Promise((resolve, reject) => {
-      let sentQueryId = false;
-      const session = http2.connect(
-        this.ksqldbURL,
-        this.httpsAgentHttp2 ? this.httpsAgentHttp2 : {}
-      );
+      return new Promise((resolve, reject) => {
+          let sentQueryId = false;
+          const session = http2.connect(
+              this.ksqldbURL,
+              this.httpsAgentHttp2 ? this.httpsAgentHttp2 : {}
+          );
 
-      session.on("error", (err) => reject(err));
+          session.on("error", (err) => reject(err));
 
-      const req = session.request(
-        this.secret && this.API ?
-          {
-            ":path": "/query-stream",
-            ":method": "POST",
-            "Authorization": this.API && this.secret ? `Basic ${Buffer.from(this.API + ":" + this.secret, 'utf8').toString('base64')}` : '',
-          }
-          :
-          {
-            ":path": "/query-stream",
-            ":method": "POST",
-          }
-      );
+          const req = session.request(
+              this.secret && this.API
+                  ? {
+                      ":path": "/query-stream",
+                      ":method": "POST",
+                      "Authorization": `Basic ${Buffer.from(this.API + ":" + this.secret, 'utf8').toString('base64')}`,
+                  }
+                  : {
+                      ":path": "/query-stream",
+                      ":method": "POST",
+                  }
+          );
 
-      const reqBody = {
-        sql: validatedQuery,
-        Accept: "application/json, application/vnd.ksqlapi.delimited.v1",
-      };
+          const reqBody = {
+              sql: validatedQuery,
+              Accept: "application/json, application/vnd.ksqlapi.delimited.v1",
+          };
 
-      req.write(JSON.stringify(reqBody), "utf8");
-      req.end();
-      req.setEncoding("utf8");
+          req.write(JSON.stringify(reqBody), "utf8");
+          req.end();
 
-      req.on("data", (chunk) => {
-        // check for chunk containing errors
-        if (JSON.parse(chunk)['@type']?.includes('error')) throw new ksqlDBError(JSON.parse(chunk));
-        // continue if chunk indicates a healthy response
-        if (!sentQueryId) {
-          sentQueryId = true;
-          cb(chunk);
-          resolve(JSON.parse(chunk)?.queryId)
-        }
-        else {
-          cb(chunk);
-        }
+          let buffer = "";
+
+          req.on("data", (chunk) => {
+              buffer += chunk;
+
+              try {
+                  const dataArray = buffer
+                      .split("\n")
+                      .filter((line) => line.trim().length > 0)
+                      .map((line) => JSON.parse(line));
+
+                  buffer = "";
+
+                  for (const data of dataArray) {
+                      if (data['@type']?.includes('error')) {
+                          throw new ksqlDBError(data);
+                      }
+
+                      if (!sentQueryId) {
+                          sentQueryId = true;
+                          cb(data);
+                          resolve(data.queryId);
+                      } else {
+                          cb(data);
+                      }
+                  }
+              } catch (err) {
+                  if (!(err instanceof SyntaxError)) throw err;
+              }
+          });
+
+          req.on("end", () => session.close());
       });
-
-      req.on("end", () => session.close());
-    })
   }
 
   /**
